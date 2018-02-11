@@ -8,6 +8,7 @@
 #include <unistd.h>
 
 #include "../include/libbootimg.h"
+#include "external/compiler-rt/lib/sanitizer_common/sanitizer_common_interceptors.inc"
 
 #define ACT_HELP    0
 #define ACT_EXTRACT 1
@@ -21,6 +22,8 @@ static const char *default_fname_blobs[] = {
     "stage2.img", // LIBBOOTIMG_BLOB_SECOND
     "dtb.img",    // LIBBOOTIMG_BLOB_DTB
 };
+
+static const char *default_fname_fdt = "fdt.img";
 
 static const char *blob_names[] = {
     "kernel",       // LIBBOOTIMG_BLOB_KERNEL
@@ -38,6 +41,7 @@ struct bbootimg_info
     const char *fname_img;
     const char *fname_cfg;
     const char *fname_blobs[LIBBOOTIMG_BLOB_CNT];
+    const char *fname_fdt;
 };
 
 static void print_help(const char *prog_name)
@@ -59,8 +63,9 @@ static void print_help(const char *prog_name)
     "    - kernel image (zImage)\n"
     "    - ramdisk image (initrd.img)\n"
     "    - second stage image (stage2.img)\n"
+    "    - flattened device tree (kernel appended or from dtb; fdt.img)\n"
     "\n"
-    "%s -u <bootimg> [-c \"param=value\"] [-f <bootimg.cfg>] [-k <kernel>] [-r <ramdisk>] [-s <secondstage>] [-d <dtb> ] [-m]\n"
+    "%s -u <bootimg> [-c \"param=value\"] [-f <bootimg.cfg>] [-k <kernel>] [-r <ramdisk>] [-s <secondstage>] [-d <dtb> ] [--fdt <fdt>] [-m]\n"
     "    update current boot image with objects given in command line\n"
     "    - header informations given in arguments (several can be provided)\n"
     "    - header informations given in config file\n"
@@ -68,6 +73,7 @@ static void print_help(const char *prog_name)
     "    - ramdisk image\n"
     "    - second stage image\n"
     "    - device tree blob\n"
+    "    - flattened device tree (kernel appended or from dtb)\n"
     "    - -m means that bootsize is used as \"maximum\", i.e. the image will not be padded with 0 to this size\n"
     "\n"
     "%s --create <bootimg> [-c \"param=value\"] [-f <bootimg.cfg>] -k <kernel> -r <ramdisk> [-s <secondstage>] [-d <dtb> ] [-m]\n"
@@ -261,6 +267,8 @@ static void load_default_filenames(struct bbootimg_info *i)
 
     for(x = 0; x < LIBBOOTIMG_BLOB_CNT; ++x)
         i->fname_blobs[x] = default_fname_blobs[x];
+
+    i->fname_fdt = default_fname_fdt;
 }
 
 static int print_info(const char *path)
@@ -417,6 +425,11 @@ static int extract_bootimg(struct bbootimg_info *i)
         }
     }
 
+    if (i->img.fdt_info.fdt_hdr != NULL)
+    {
+        libbootimg_dump_fdt(&i->img, i->fname_fdt);
+    }
+
     libbootimg_destroy(&i->img);
     return 0;
 }
@@ -473,6 +486,17 @@ static int update_bootimg(struct bbootimg_info *i)
         if(res < 0)
         {
             fprintf(stderr, "Failed to load %s (%s)!\n", blob_names[x], libbootimg_error_str(res));
+            goto exit;
+        }
+    }
+
+    if (i->fname_fdt)
+    {
+        res = libbootimg_load_fdt(&i->img, i->fname_fdt);
+        if (res < 0)
+        {
+            fprintf(stderr, "Failed to load FDT. Error: (%s)!\n",
+                    libbootimg_error_str(res));
             goto exit;
         }
     }
@@ -631,6 +655,10 @@ int main(int argc, const char *argv[])
             info.fname_blobs[LIBBOOTIMG_BLOB_SECOND] = argv[++i];
         else if(strcmp("-d", argv[i]) == 0)
             info.fname_blobs[LIBBOOTIMG_BLOB_DTB] = argv[++i];
+        else if(strcmp("--fdt", argv[i]) == 0)
+        {
+            info.fname_fdt = argv[++i];
+        }
         else
         {
             fprintf(stderr, "Unknown argument: %s\n\n", argv[i]);
